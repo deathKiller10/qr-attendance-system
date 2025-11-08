@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-900">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic QR Attendance System</title>
+    <!-- 1. Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 2. QR Code Generation Library (for Faculty) -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <!-- 3. QR Code Scanning Library (for Student) -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                },
+            },
+        };
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        /* Simple loading spinner */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Style the QR scanner */
+        #qr-reader {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            border: 2px dashed #4b5563;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+    </style>
+</head>
+<body class="h-full text-gray-100">
+    <!-- Main Application Container -->
+    <div id="app" class="max-w-md mx-auto min-h-screen p-4 flex flex-col justify-center">
+
+        <!-- ===== 0. GLOBAL LOADER ===== -->
+        <div id="loading-view" class="space-y-6">
+            <div class="loader mx-auto"></div>
+            <p class="text-center text-gray-400">Checking session...</p>
+        </div>
+
+        <!-- ===== 1. LOGIN SCREEN (Hidden by default) ===== -->
+        <div id="login-view" class="space-y-6 hidden">
+            <h1 class="text-3xl font-bold text-center text-white">Attendance Portal</h1>
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl space-y-4">
+                <div>
+                    <label for="username" class="block text-sm font-medium text-gray-300">Username</label>
+                    <input type="text" id="username" class="mt-1 block w-full bg-gray-700 border-gray-600 text-white rounded-md shadow-sm p-2" placeholder="reg_number or faculty_id">
+                </div>
+                <div>
+                    <label for="password" class="block text-sm font-medium text-gray-300">Password</label>
+                    <input type="password" id="password" class="mt-1 block w-full bg-gray-700 border-gray-600 text-white rounded-md shadow-sm p-2" placeholder="••••••••">
+                </div>
+                <button id="login-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md transition duration-200">
+                    Sign In
+                </button>
+                <div id="login-error" class="text-red-400 text-sm text-center hidden"></div>
+            </div>
+        </div>
+
+        <!-- ===== 2. STUDENT DASHBOARD (Hidden by default) ===== -->
+        <div id="student-view" class="space-y-6 hidden">
+            <div class="flex justify-between items-center">
+                <h1 class="text-2xl font-bold">Hi, <span id="student-name"></span></h1>
+                <button id="logout-btn-student" class="text-sm text-red-400 hover:underline">Logout</button>
+            </div>
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl space-y-4">
+                <h2 class="text-xl font-semibold">Your Courses</h2>
+                <div id="student-course-list" class="space-y-3">
+                    <!-- Courses will be loaded here by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== 3. FACULTY DASHBOARD (Hidden by default) ===== -->
+        <div id="faculty-view" class="space-y-6 hidden">
+            <div class="flex justify-between items-center">
+                <h1 class="text-2xl font-bold">Prof. <span id="faculty-name"></span></h1>
+                <button id="logout-btn-faculty" class="text-sm text-red-400 hover:underline">Logout</button>
+            </div>
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl space-y-4">
+                <h2 class="text-xl font-semibold">Your Courses</h2>
+                <div id="faculty-course-list" class="space-y-3">
+                    <!-- Courses will be loaded here by JS -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- ===== 4. FACULTY REPORT VIEW (Hidden by default) ===== -->
+        <div id="report-view" class="space-y-6 hidden">
+            <div class="flex justify-between items-center">
+                <h1 class="text-2xl font-bold" id="report-title">Attendance Report</h1>
+                <button id="report-back-btn" class="text-sm text-blue-400 hover:underline">&larr; Back to Dashboard</button>
+            </div>
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl space-y-4">
+                <div>
+                    <label for="report-date" class="block text-sm font-medium text-gray-300">Select Date:</label>
+                    <input type="date" id="report-date" class="mt-1 block w-full bg-gray-700 border-gray-600 text-white rounded-md shadow-sm p-2">
+                </div>
+                <div id="report-loader" class="loader mx-auto hidden"></div>
+                <div id="report-list" class="space-y-3">
+                    <!-- Report items will be loaded here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== MODALS (Placed at the root, hidden by default) ===== -->
+
+        <!-- Student: QR Scanner Modal -->
+        <div id="scanner-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4">
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md space-y-4">
+                <h2 class="text-xl font-bold text-center">Scan Classroom QR Code</h2>
+                <div id="qr-reader"></div>
+                <div id="scan-status" class="text-center text-yellow-400">Scanning...</div>
+                <button id="close-scanner-btn" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md transition duration-200">
+                    Cancel
+                </button>
+            </div>
+        </div>
+
+        <!-- Faculty: QR Code Generator Modal (THIS WAS THE BROKEN SECTION) -->
+        <div id="qr-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center p-4">
+            <div class="bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-md space-y-4 text-center">
+                <h2 class="text-xl font-bold">Display this QR Code</h2>
+                <p class="text-sm text-gray-400">This code will expire in <span id="qr-timer" class="font-bold text-yellow-400">60</span> seconds.</p>
+                <div id="qrcode-container" class="flex justify-center p-4 bg-white rounded-lg">
+                    <!-- QR Code will be generated here by JS -->
+                </div>
+                <div id="qr-loader" class="loader mx-auto hidden"></div>
+                <button id="close-qr-btn" class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded-md transition duration-200">
+                    Close
+                </button>
+            </div>
+        </div>
+
+    </div> <!-- End of #app container -->
+
+    <!-- ===== JAVASCRIPT ===== -->
+    <script>
+        // ===== GLOBAL STATE =====
+        let currentUser = null;
+        let html5QrCode = null;
+        let qrCodeTimerInterval = null;
+        let currentReportCourseId = null; 
+
+        // ===== API Abstraction =====
+        const API = {
+            // Check if we have a session
+            checkSession: async () => {
+                const response = await fetch('/api/auth/me'); // Calls our new endpoint
+                if (!response.ok) {
+                    throw new Error('No active session');
+                }
+                return await response.json();
+            },
+
+            login: async (username, password) => {
+                const response = await fetch('/api/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(errorText || 'Invalid username or password');
+                }
+                return await response.json();
+            },
+
+            // Call the real logout endpoint
+            logout: async () => {
+                const response = await fetch('/api/auth/logout', {
+                    method: 'POST'
+                });
+                if (!response.ok) {
+                    throw new Error('Logout failed');
+                }
+            },
+            
+            getCourses: async () => {
+                const response = await fetch('/api/courses');
+                if (!response.ok) {
+                    if (response.status === 401) {
+                        handleLogout();
+                    }
+                    throw new Error('Could not fetch courses.');
+                }
+                return await response.json();
+            },
+            
+            // Get Report API
+            getReport: async (courseId, dateString) => {
+                const response = await fetch(`/api/attendance/report/${courseId}?date=${dateString}`);
+                if (!response.ok) {
+                    if (response.status === 401) handleLogout();
+                    if (response.status === 403) throw new Error('You are not authorized to view this report.');
+                    throw new Error('Could not fetch report.');
+                }
+                return await response.json();
+            },
+
+            generateQRCodeData: async (courseId) => {
+                const response = await fetch(`/api/attendance/generate-qr?courseId=${courseId}`);
+                if (!response.ok) {
+                    throw new Error('Could not generate QR code.');
+                }
+                const data = await response.json();
+                return data.token;
+            },
+
+            submitAttendance: async (qrCodeData) => {
+                const response = await fetch('/api/attendance/mark', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: qrCodeData })
+                });
+                
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.message || 'Attendance submission failed.');
+                }
+                return result;
+            }
+        };
+
+        
+        // ===== DOM Elements =====
+        const loadingView = document.getElementById('loading-view');
+        const loginView = document.getElementById('login-view');
+        const studentView = document.getElementById('student-view');
+        const facultyView = document.getElementById('faculty-view');
+        const reportView = document.getElementById('report-view'); 
+        const loginBtn = document.getElementById('login-btn');
+        const loginError = document.getElementById('login-error');
+
+        // ===== APP LOGIC =====
+        
+        // This is the main startup function
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 1. Add all button listeners for STATIC elements
+            loginBtn.addEventListener('click', handleLogin);
+            document.getElementById('logout-btn-student').addEventListener('click', handleLogout);
+            document.getElementById('logout-btn-faculty').addEventListener('click', handleLogout);
+            document.getElementById('close-scanner-btn').addEventListener('click', stopScanner);
+            document.getElementById('close-qr-btn').addEventListener('click', closeQRModal);
+            document.getElementById('report-back-btn').addEventListener('click', handleBackToDashboard);
+            document.getElementById('report-date').addEventListener('change', setupReportView);
+
+            // 2. Check for an active session
+            try {
+                // Show the global loader
+                switchView('loading-view');
+                
+                // Try to get the current user
+                const userData = await API.checkSession();
+                currentUser = userData;
+                
+                // If successful, go to the correct dashboard
+                if (currentUser.role === 'ROLE_STUDENT') {
+                    await setupStudentDashboard();
+                    switchView('student-view');
+                } else if (currentUser.role === 'ROLE_FACULTY') {
+                    await setupFacultyDashboard();
+                    switchView('faculty-view');
+                }
+            } catch (error) {
+                // If it fails (401), just show the login page
+                console.log("No active session, showing login page.");
+                switchView('login-view');
+            }
+        });
+
+        async function handleLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            
+            if (!username || !password) {
+                showLoginError("Please enter username and password.");
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginBtn.textContent = "Signing In...";
+            loginError.classList.add('hidden');
+
+            try {
+                const userData = await API.login(username, password);
+                currentUser = userData;
+                
+                if (currentUser.role === 'ROLE_STUDENT') {
+                    await setupStudentDashboard();
+                    switchView('student-view');
+                } else if (currentUser.role === 'ROLE_FACULTY') {
+                    await setupFacultyDashboard();
+                    switchView('faculty-view');
+                }
+                
+            } catch (error) {
+                showLoginError(error.message);
+            } finally {
+                loginBtn.disabled = false;
+                loginBtn.textContent = "Sign In";
+            }
+        }
+
+        async function handleLogout() {
+            try {
+                await API.logout();
+            } catch (error) {
+                console.error("Logout failed:", error);
+            } finally {
+                currentUser = null;
+                document.getElementById('username').value = '';
+                document.getElementById('password').value = '';
+                switchView('login-view');
+                window.location.reload();
+            }
+        }
+
+        async function setupStudentDashboard() {
+            document.getElementById('student-name').textContent = currentUser.name;
+            const courseListEl = document.getElementById('student-course-list');
+            courseListEl.innerHTML = '<div class="loader mx-auto"></div>';
+            
+            try {
+                const courses = await API.getCourses();
+                courseListEl.innerHTML = '';
+                if (courses.length === 0) {
+                    courseListEl.innerHTML = '<p class="text-gray-400">You are not enrolled in any courses.</p>';
+                    return;
+                }
+
+                courses.forEach(course => {
+                    const courseEl = document.createElement('div');
+                    courseEl.className = "bg-gray-700 p-4 rounded-lg flex justify-between items-center";
+                    courseEl.innerHTML = `
+                        <div>
+                            <p class="font-semibold">${course.name}</p>
+                            <p class="text-sm text-gray-400">${course.description}</p>
+                        </div>
+                        <button data-course-id="${course.id}" class="mark-attendance-btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-md text-sm">
+                            Mark
+                        </button>
+                    `;
+                    courseListEl.appendChild(courseEl);
+                });
+                
+                // Add listeners to dynamic buttons
+                document.querySelectorAll('.mark-attendance-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const courseId = e.currentTarget.getAttribute('data-course-id');
+                        startScanner(courseId);
+                    });
+                });
+            } catch (error) {
+                console.error(error);
+                courseListEl.innerHTML = '<p class="text-red-400">Error loading courses.</p>';
+            }
+        }
+
+        async function setupFacultyDashboard() {
+            document.getElementById('faculty-name').textContent = currentUser.name;
+            const courseListEl = document.getElementById('faculty-course-list');
+            courseListEl.innerHTML = '<div class="loader mx-auto"></div>';
+
+            try {
+                const courses = await API.getCourses();
+                courseListEl.innerHTML = '';
+                if (courses.length === 0) {
+                    courseListEl.innerHTML = '<p class="text-gray-400">You are not assigned to any courses.</p>';
+                    return;
+                }
+
+                courses.forEach(course => {
+                    const courseEl = document.createElement('div');
+                    courseEl.className = "bg-gray-700 p-4 rounded-lg flex justify-between items-center";
+                    courseEl.innerHTML = `
+                        <div>
+                            <p class="font-semibold">${course.name}</p>
+                            <p class="text-sm text-gray-400">${course.description}</p>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button data-course-id="${course.id}" class="view-report-btn bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-3 rounded-md text-sm">
+                                Report
+                            </button>
+                            <button data-course-id="${course.id}" class="start-attendance-btn bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-3 rounded-md text-sm">
+                                Start
+                            </button>
+                        </div>
+                    `;
+                    courseListEl.appendChild(courseEl);
+                });
+
+                // Add listeners to dynamic buttons
+                document.querySelectorAll('.start-attendance-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const courseId = e.currentTarget.getAttribute('data-course-id');
+                        showQRModal(courseId);
+                    });
+                });
+                
+                document.querySelectorAll('.view-report-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        const courseId = e.currentTarget.getAttribute('data-course-id');
+                        const courseName = e.currentTarget.closest('.bg-gray-700').querySelector('p.font-semibold').textContent;
+                        showReportView(courseId, courseName);
+                    });
+                });
+            } catch (error) {
+                console.error(error);
+                courseListEl.innerHTML = '<p class="text-red-400">Error loading courses.</p>';
+            }
+        }
+        
+        // --- QR Code Generation (Faculty) ---
+        
+        async function showQRModal(courseId) {
+            const modal = document.getElementById('qr-modal');
+            const container = document.getElementById('qrcode-container');
+            const loader = document.getElementById('qr-loader');
+            const timerEl = document.getElementById('qr-timer');
+            
+            modal.classList.remove('hidden');
+            container.innerHTML = '';
+            loader.classList.remove('hidden');
+            
+            generateAndDisplayQR(courseId, container, loader, timerEl);
+            
+            qrCodeTimerInterval = setInterval(() => {
+                generateAndDisplayQR(courseId, container, loader, timerEl);
+            }, 60000); 
+        }
+
+        async function generateAndDisplayQR(courseId, container, loader, timerEl) {
+            try {
+                container.innerHTML = '';
+                loader.classList.remove('hidden');
+                
+                const qrData = await API.generateQRCodeData(courseId);
+                
+                new QRCode(container, {
+                    text: qrData,
+                    width: 256,
+                    height: 256,
+                    colorDark : "#000000",
+                    colorLight : "#ffffff",
+                    correctLevel : QRCode.CorrectLevel.H
+                });
+                
+                loader.classList.add('hidden');
+                
+                let timeLeft = 60;
+                timerEl.textContent = timeLeft;
+                if (window.qrCountdown) clearInterval(window.qrCountdown);
+                
+                window.qrCountdown = setInterval(() => {
+                    timeLeft--;
+                    timerEl.textContent = Math.max(0, timeLeft);
+                    if (timeLeft <= 0) {
+                        clearInterval(window.qrCountdown);
+                    }
+                }, 1000);
+
+            } catch (err) {
+                console.error("Failed to generate QR code:", err);
+                container.innerHTML = '<p class="text-red-500">Could not generate QR code.</p>';
+            }
+        }
+        
+        function closeQRModal() {
+            document.getElementById('qr-modal').classList.add('hidden');
+            if (qrCodeTimerInterval) {
+                clearInterval(qrCodeTimerInterval);
+                qrCodeTimerInterval = null;
+            }
+            if (window.qrCountdown) {
+                clearInterval(window.qrCountdown);
+            }
+        }
+
+        // --- QR Code Scanning (Student) ---
+        
+        function startScanner(courseId) {
+            const modal = document.getElementById('scanner-modal');
+            const statusEl = document.getElementById('scan-status');
+            modal.classList.remove('hidden');
+            statusEl.textContent = "Starting camera...";
+            statusEl.className = "text-center text-yellow-400";
+            
+            html5QrCode = new Html5Qrcode("qr-reader");
+            const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+            html5QrCode.start(
+                { facingMode: "environment" },
+                config,
+                (decodedText, decodedResult) => {
+                    onScanSuccess(decodedText, courseId);
+                },
+                (errorMessage) => { /* ignore */ }
+            ).catch((err) => {
+                console.error("Could not start scanner:", err);
+                statusEl.textContent = "Failed to start camera.";
+                statusEl.className = "text-center text-red-500";
+            });
+        }
+        
+        async function onScanSuccess(qrCodeData, courseId) {
+            await stopScanner(false);
+            
+            const statusEl = document.getElementById('scan-status');
+            statusEl.textContent = "Verifying code...";
+            statusEl.className = "text-center text-blue-400";
+
+            try {
+                const result = await API.submitAttendance(qrCodeData);
+                
+                statusEl.textContent = result.message;
+                statusEl.className = "text-center text-green-400";
+
+                setTimeout(() => {
+                    document.getElementById('scanner-modal').classList.add('hidden');
+                }, 1500);
+
+            } catch (error) {
+                statusEl.textContent = error.message; 
+                statusEl.className = "text-center text-red-500";
+                
+                setTimeout(() => {
+                    document.getElementById('scanner-modal').classList.add('hidden');
+                }, 2000);
+            }
+        }
+        
+        async function stopScanner(hideModal = true) {
+            const modal = document.getElementById('scanner-modal');
+            if (hideModal) {
+                modal.classList.add('hidden');
+            }
+            
+            if (html5QrCode && html5QrCode.isScanning) {
+                try {
+                    await html5QrCode.stop();
+                    console.log("Scanner stopped.");
+                } catch (err) {
+                    console.error("Error stopping scanner:", err);
+                }
+            }
+            html5QrCode = null;
+        }
+
+        // --- Report View Functions ---
+        
+        function showReportView(courseId, courseName) {
+            currentReportCourseId = courseId;
+            document.getElementById('report-title').textContent = `${courseName} Report`;
+            
+            const dateInput = document.getElementById('report-date');
+            dateInput.value = getTodayDateString();
+            
+            switchView('report-view');
+            setupReportView();
+        }
+        
+        async function setupReportView() {
+            if (!currentReportCourseId) return;
+            
+            const date = document.getElementById('report-date').value;
+            const listEl = document.getElementById('report-list');
+            const loader = document.getElementById('report-loader');
+            
+            listEl.innerHTML = '';
+            loader.classList.remove('hidden');
+            
+            try {
+                const reportItems = await API.getReport(currentReportCourseId, date);
+                
+                if (reportItems.length === 0) {
+                    listEl.innerHTML = '<p class="text-gray-400 text-center">No attendance records found for this date.</p>';
+                } else {
+                    reportItems.forEach(item => {
+                        const itemEl = document.createElement('div');
+                        itemEl.className = 'bg-gray-700 p-3 rounded-lg flex justify-between items-center';
+                        
+                        const timestamp = new Date(item.timestamp).toLocaleTimeString('en-IN', {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                            hour12: true
+                        });
+
+                        itemEl.innerHTML = `
+                            <div>
+                                <p class="font-semibold">${item.studentName}</p>
+                                <p class="text-sm text-gray-400">${item.studentId}</p>
+                            </div>
+                            <p class="text-sm text-green-400">${timestamp}</p>
+                        `;
+                        listEl.appendChild(itemEl);
+                    });
+                }
+                
+            } catch (error) {
+                console.error("Failed to load report:", error);
+                listEl.innerHTML = `<p class="text-red-400 text-center">${error.message}</p>`;
+            } finally {
+                loader.classList.add('hidden');
+            }
+        }
+        
+        function handleBackToDashboard() {
+            currentReportCourseId = null;
+            switchView('faculty-view');
+        }
+
+        // --- Utility Functions ---
+
+        function switchView(viewId) {
+            // Updated to include the new loading-view
+            const views = [loadingView, loginView, studentView, facultyView, reportView];
+            views.forEach(view => {
+                if (view.id === viewId) {
+                    view.classList.remove('hidden');
+                } else {
+                    view.classList.add('hidden');
+                }
+            });
+        }
+        
+        function showLoginError(message) {
+            loginError.textContent = message;
+            loginError.classList.remove('hidden');
+        }
+        
+        function getTodayDateString() {
+            const today = new Date();
+            const year = today.getFullYear();
+            const month = String(today.getMonth() + 1).padStart(2, '0');
+            const day = String(today.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+    </script>
+</body>
+</html>
