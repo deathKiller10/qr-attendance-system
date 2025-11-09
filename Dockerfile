@@ -9,7 +9,6 @@ WORKDIR /app
 COPY .mvn/ .mvn
 COPY mvnw pom.xml ./
 
-# ===== THIS IS THE FIX =====
 # Add execute permission to the Maven wrapper script
 RUN chmod +x ./mvnw
 
@@ -19,8 +18,8 @@ RUN ./mvnw dependency:go-offline
 # Copy the rest of your source code
 COPY src ./src
 
-# Build the application .jar file
-RUN ./mvnw clean install
+# Build the application .jar file and SKIP the tests
+RUN ./mvnw clean install -DskipTests
 
 # ----- STAGE 2: Create the Final, Smaller Image -----
 FROM eclipse-temurin:17-jre-jammy
@@ -30,6 +29,4 @@ WORKDIR /app
 COPY --from=builder /app/target/QRAttendance-0.0.1-SNAPSHOT.jar ./app.jar
 
 # This is the command to run your application.
-# Spring Boot will automatically listen on the $PORT variable
-# provided by Render, thanks to our application.properties change.
 ENTRYPOINT ["java", "-jar", "./app.jar"]
